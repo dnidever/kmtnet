@@ -535,67 +535,31 @@ def makemeta(fluxfile=None,header=None):
         header = fits.getheader(fluxfile)
     meta = header
 
-    #- INSTCODE -
-    if "DTINSTRU" in meta.keys():
-        if meta["DTINSTRU"] == 'mosaic3':
-            meta["INSTCODE"] = 'k4m'
-        elif meta["DTINSTRU"] == '90prime':
-            meta["INSTCODE"] = 'ksb'
-        elif meta["DTINSTRU"] == 'decam':
-            meta["INSTCODE"] = 'c4d'
-        else:
-            print("Cannot determine INSTCODE type")
-            return
-    else:
-        print("No DTINSTRU found in header.  Cannot determine instrument type")
-        return
-
     #- RDNOISE -
     if "RDNOISE" not in meta.keys():
-        # Check DECam style rdnoise
-        if "RDNOISEA" in meta.keys():
-            rdnoisea = meta["RDNOISEA"]
-            rdnoiseb = meta["RDNOISEB"]
-            rdnoise = (rdnoisea+rdnoiseb)*0.5
-            meta["RDNOISE"] = rdnoise
         # Check other names
         if meta.get('RDNOISE') is None:
             for name in ['READNOIS','ENOISE']:
-                if name in meta.keys(): meta['RDNOISE']=meta[name]
-        # Bok
-        if meta['INSTCODE'] == 'ksb':
-            meta['RDNOISE']= [6.625, 7.4, 8.2, 7.1][meta['CCDNUM']-1]
+                if name in meta.keys(): meta['RDNOISE']=float(meta[name])
         if meta.get('RDNOISE') is None:
             print('No RDNOISE found')
             return
+    else:
+        meta['RDNOISE'] = float(meta['RDNOISE'])  # make sure it's float
     #- GAIN -
     if "GAIN" not in meta.keys():
         try:
-            gainmap = { 'c4d': lambda x: 0.5*(x.get('GAINA')+x.get('GAINB')),
-                        'k4m': lambda x: x.get('GAIN'),
-                        'ksb': lambda x: [1.3,1.5,1.4,1.4][x.get['CCDNUM']-1] }  # bok gain in HDU0, use list here
-            gain = gainmap[meta["INSTCODE"]](meta)
-            meta["GAIN"] = gain
+            gain = meta.get('gain')
+            meta["GAIN"] = float(gain)
         except:
-            gainmap_avg = { 'c4d': 3.9845419, 'k4m': 1.8575, 'ksb': 1.4}
-            gain = gainmap_avg[meta["INSTCODE"]]
-            meta["GAIN"] = gain
-    #- CPFWHM -
-    # FWHM values are ONLY in the extension headers
-    cpfwhm_map = { 'c4d': 1.5 if meta.get('FWHM') is None else meta.get('FWHM')*0.27, 
-                   'k4m': 1.5 if meta.get('SEEING1') is None else meta.get('SEEING1'),
-                   'ksb': 1.5 if meta.get('SEEING1') is None else meta.get('SEEING1') }
-    cpfwhm = cpfwhm_map[meta["INSTCODE"]]
-    meta['CPFWHM'] = cpfwhm
+            raise Exception('no gain')
+    else:
+        meta['GAIN'] = float(meta['GAIN'])  # make sure it's float
     #- PIXSCALE -
     if "PIXSCALE" not in meta.keys():
-        pixmap = { 'c4d': 0.27, 'k4m': 0.258, 'ksb': 0.45 }
-        try:
-            meta["PIXSCALE"] = pixmap[meta["INSTCODE"]]
-        except:
-            w = WCS(meta)
-            meta["PIXSCALE"] = np.max(np.abs(w.pixel_scale_matrix))
-
+        w = WCS(meta)
+        meta["PIXSCALE"] = np.max(np.abs(w.pixel_scale_matrix))
+        
     return meta
 
 
@@ -877,45 +841,6 @@ def runsex(fluxfile=None,wtfile=None,maskfile=None,meta=None,outfile=None,config
 
     # 3a) Make subimages for flux, weight, mask
 
-    # Turn the mask from integer to bitmask
-    if ((meta["INSTCODE"]=='c4d') & (meta["plver"]>='V3.5.0')) | (meta["INSTCODE"]=='k4m') | (meta["INSTCODE"]=='ksb'):
-         #  1 = bad (in static bad pixel mask) -> 1
-         #  2 = no value (for stacks)          -> 2
-         #  3 = saturated                      -> 4
-         #  4 = bleed mask                     -> 8
-         #  5 = cosmic ray                     -> 16
-         #  6 = low weight                     -> 32
-         #  7 = diff detect                    -> 64
-         omask = mask.copy()
-         mask *= 0
-         nonzero = (omask>0)
-         mask[nonzero] = 2**((omask-1)[nonzero])    # This takes about 1 sec
-    # Fix the DECam Pre-V3.5.0 masks
-    if (meta["INSTCODE"]=='c4d') & (meta["plver"]<'V3.5.0'):
-      # --CP bit masks, Pre-V3.5.0 (PLVER)
-      # Bit   DQ Type  PROCTYPE
-      # 1  detector bad pixel          ->  1 
-      # 2  saturated                   ->  4
-      # 4  interpolated                ->  32
-      # 16  single exposure cosmic ray ->  16
-      # 64  bleed trail                ->  8
-      # 128  multi-exposure transient  ->  0 TURN OFF
-      # --CP bit masks, V3.5.0 on (after ~10/28/2014), integer masks
-      #  1 = bad (in static bad pixel mask)
-      #  2 = no value (for stacks)
-      #  3 = saturated
-      #  4 = bleed mask
-      #  5 = cosmic ray
-      #  6 = low weight
-      #  7 = diff detect
-      omask = mask.copy()
-      mask *= 0     # re-initialize
-      mask += (np.bitwise_and(omask,1)==1) * 1    # bad pixels
-      mask += (np.bitwise_and(omask,2)==2) * 4    # saturated
-      mask += (np.bitwise_and(omask,4)==4) * 32   # interpolated
-      mask += (np.bitwise_and(omask,16)==16) * 16  # cosmic ray
-      mask += (np.bitwise_and(omask,64)==64) * 8   # bleed trail
-
     # Mask out bad pixels in WEIGHT image
     #  set wt=0 for mask>0 pixels
     wt[ (mask>0) | (wt<0) ] = 0   # CP sets bad pixels to wt=0 or sometimes negative
@@ -993,7 +918,7 @@ def runsex(fluxfile=None,wtfile=None,maskfile=None,meta=None,outfile=None,config
         # SEEING_FWHM
         m = re.search('^SEEING_FWHM',l)
         if m != None:
-            lines[cnt] = "SEEING_FWHM     "+str(meta["cpfwhm"])+"            # stellar FWHM in arcsec\n"
+            lines[cnt] = "SEEING_FWHM     "+str(meta["fwhm"])+"            # stellar FWHM in arcsec\n"
         # PHOT_APERTURES, aperture diameters in pixels
         m = re.search('^PHOT_APERTURES',l)
         if m != None:
@@ -1392,7 +1317,7 @@ def mkopt(base=None,meta=None,VA=1,LO=7.0,TH=3.5,LS=0.2,HS=1.0,LR=-1.0,HR=1.0,
 
     optfile = base+".opt"
     alsoptfile = base+".als.opt"
-
+    
     # Get frame specific parameters from meta if necessary
     if GA is None: GA = meta['gain']
     if RD is None: RD = meta['rdnoise']
@@ -1538,63 +1463,6 @@ def mkdaoim(fluxfile=None,wtfile=None,maskfile=None,meta=None,outfile=None,logge
     mask,mhead = fits.getdata(maskfile,header=True)
 
     # Set bad pixels to saturation value
-    # --DESDM bit masks (from Gruendl):
-    # BADPIX_BPM 1          /* set in bpm (hot/dead pixel/column)        */
-    # BADPIX_SATURATE 2     /* saturated pixel                           */
-    # BADPIX_INTERP 4
-    #     /* interpolated pixel                        */
-    # BADPIX_LOW     8      /* too little signal- i.e. poor read         */
-    # BADPIX_CRAY   16      /* cosmic ray pixel                          */
-    # BADPIX_STAR   32      /* bright star pixel                         */
-    # BADPIX_TRAIL  64      /* bleed trail pixel                         */
-    # BADPIX_EDGEBLEED 128  /* edge bleed pixel                          */
-    # BADPIX_SSXTALK 256    /* pixel potentially effected by xtalk from super-saturated source */
-    # BADPIX_EDGE   512     /* pixel flagged to exclude CCD glowing edges */
-    # BADPIX_STREAK 1024    /* pixel associated with satellite (airplane/meteor) streak     */
-    # BADPIX_FIX    2048    /* a bad pixel that was fixed                */
-    # --CP bit masks, Pre-V3.5.0 (PLVER)
-    # Bit   DQ Type  PROCTYPE
-    # 1  detector bad pixel          InstCal
-    # 1  detector bad pixel/no data  Resampled
-    # 1  No data                     Stacked
-    # 2  saturated                   InstCal/Resampled
-    # 4  interpolated                InstCal/Resampled
-    # 16  single exposure cosmic ray InstCal/Resampled
-    # 64  bleed trail                InstCal/Resampled
-    # 128  multi-exposure transient  InstCal/Resampled
-    # --CP bit masks, V3.5.0 on (after ~10/28/2014), integer masks
-    #  1 = bad (in static bad pixel mask)
-    #  2 = no value (for stacks)
-    #  3 = saturated
-    #  4 = bleed mask
-    #  5 = cosmic ray
-    #  6 = low weight
-    #  7 = diff detect
-    # You can't have combinations but the precedence as in the order
-    # of the list (which is also the order in which the processing
-    # discovers them).  So a pixel marked as "bad" (1) won't ever be
-    # flagged as "diff detect" (7) later on in the processing.
-    #
-    # "Turn off" the "difference image masking", clear the 8th bit
-    # 128 for Pre-V3.5.0 images and set 7 values to zero for V3.5.0 or later.
-
-    #logger.info("Turning off the CP difference image masking flags")
-    if meta.get("plver") is not None:      # CP data
-        # V3.5.0 and on, Integer masks
-        versnum = meta["plver"].split('.')
-        if (int(versnum[0][-1])>3) or ((int(versnum[0][-1])==3) and (int(versnum[1])>=5)):
-            bdpix = (mask == 7)
-            nbdpix = np.sum(bdpix)
-            if nbdpix > 0: mask[bdpix]=0
-
-        # Pre-V3.5.0, Bitmasks
-        else:
-            bdpix = ( (mask & 2**7) == 2**7)
-            nbdpix = np.sum(bdpix)                
-            if nbdpix > 0: mask[bdpix]-=128   # clear 128
-
-        logger.info("%d pixels cleared of difference image mask flag" % nbdpix)
-
     bdpix = (mask > 0.0)
     nbdpix = np.sum(bdpix)
     if nbdpix>0: flux[bdpix]=6e4
@@ -1602,8 +1470,6 @@ def mkdaoim(fluxfile=None,wtfile=None,maskfile=None,meta=None,outfile=None,logge
 
     fhead.append('GAIN',meta["GAIN"])
     fhead.append('RDNOISE',meta["RDNOISE"])
-    if 'plver' not in fhead:
-        fhead['plver'] = meta['PLVER']
 
     # DAOPHOT can only handle BITPIX=16, 32, -32
     if fhead['BITPIX'] not in [16,32,-32]:

@@ -16,21 +16,24 @@ import socket
 from datetime import datetime
 from argparse import ArgumentParser
 import traceback
-from nsc import utils
-from nsc.nsc_instcal_measure import Exposure
+from kmtnet import utils
+from kmtnet.kmtnet import Exposure
 
 if __name__ == "__main__":
 
     # Run measurement on one full KMTNet image
     parser = ArgumentParser(description='Run measurement on one NSC InstCal image')
     parser.add_argument('filename', type=str, nargs=1, help='Absolute flux filename')
-    parser.add_argument('--host',type=str,nargs=1,default="None",help='hostname, default "None", other options supported are "cca","tempest_katie","tempest_group","gp09/7","tacc"')
-    parser.add_argument('--stagger',type=int, nargs=1, default=60, help='Stagger time')
+    parser.add_argument('--host',type=str,nargs=1,default="tempest",help='hostname ("tempest","tempest_group","gp09/7","tacc")')
+    parser.add_argument('--stagger',type=int, nargs=1, default=0, help='Stagger time')
     parser.add_argument('-r','--redo', action='store_true', help='Redo exposures that were previously processed')
     args = parser.parse_args()
 
-    # Inputs                                                                                                  
-    host = str(args.host[0])                 # hostname of server, default "None"
+    # Inputs
+    if isinstance(args.host,list):
+        host = args.host[0]
+    else:
+        host = args.host
     if host=="None": host = None
     if isinstance(args.stagger,list):
         stagger = args.stagger[0]

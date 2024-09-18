@@ -33,19 +33,19 @@ import time
 import warnings
 import requests
 from dlnpyutils import utils as dln,coords
-from prometheus import prometheus,utils
-from . import phot,
+import prometheus as pm
+from . import phot,utils
 
 # Ignore these warnings, it's a bug
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
-# Load default DECam chip data
-if os.path.exists(utils.datadir()+'params/decam_chip_data.fits'):
-    DECAM_DATA = Table.read(utils.datadir()+'params/decam_chip_data.fits')
-else:
-    print('Could not find decam_chip_data.fits file')
-    DECAM_DATA = None
+## Load default DECam chip data
+#if os.path.exists(utils.datadir()+'params/decam_chip_data.fits'):
+#    DECAM_DATA = Table.read(utils.datadir()+'params/decam_chip_data.fits')
+#else:
+#    print('Could not find decam_chip_data.fits file')
+#    DECAM_DATA = None
 
     
 #-------------------------------------------------
@@ -58,9 +58,10 @@ class Exposure:
 
     # Initialize Exposure object
     def __init__(self,filename,host):
+        filename = os.path.abspath(filename)
         # Check that the files exist
         if os.path.exists(filename) is False:
-            print(fluxfile+" NOT found")
+            print(filename+" NOT found")
             return
         #self.delete = delete  # delete original files
         # Setting up the object properties
@@ -83,13 +84,15 @@ class Exposure:
         nhdu = len(hdulist)
         hdulist.close()
         self.nexten = nhdu
+        self.nchips = nhdu-1
         # Get night
+        head0 = fits.getheader(filename,0)
         dateobs = head0.get("DATE-OBS")
         night = dateobs[0:4]+dateobs[5:7]+dateobs[8:10]
         self.night = night
         # Output directory
         basedir,tmpdir = utils.getdirs(self.host)
-        self.outdir = os.path.join(base,self.night[:4],self.night,self.base)
+        self.outdir = os.path.join('/home/x51j468/kmtnet/',self.night,self.base)
         
     # Setup
     def setup(self):
@@ -132,10 +135,10 @@ class Exposure:
         self.logger.info("Starting logfile at "+self.logfile)
 
         # Copy over images from zeus1:/mss or Download images from Astro Data Archive
-        filename = "bigfile.fits.fz"
+        filename = "bigfile.fits"
         shutil.copyfile(self.origfilename,os.path.join(tmpdir,os.path.basename(self.origfilename)))
         self.logger.info("  "+self.origfilename)
-        if (os.path.basename(self.origfilename) != filenane):
+        if (os.path.basename(self.origfilename) != filename):
             os.symlink(os.path.basename(self.origfilename),filename)
 
         # Set local working filenames
@@ -146,9 +149,11 @@ class Exposure:
             os.makedirs(self.outdir)   # will make multiple levels of directories if necessary
             self.logger.info("Making output directory: "+self.outdir)
 
-
+    def __len__(self):
+        return self.nchips
+            
     # Load chip
-    def loadchip(self,extension,fluxfile="flux.fits")
+    def loadchip(self,extension,filename="flux.fits"):
         # Load the data
         self.logger.info(" Loading chip "+str(extension))
         # Check that the working files set by "setup"
@@ -156,7 +161,7 @@ class Exposure:
             self.logger.warning("Local working filenames not set.  Make sure to run setup() first")
             return(False)
         try:
-            flux,fhead = fits.getdata(self.filenae,extension,header=True)
+            flux,fhead = fits.getdata(self.filename,extension,header=True)
             fhead0 = fits.getheader(self.filename,0)  # add PDU info
             fhead.extend(fhead0,unique=True)
         except:
@@ -168,6 +173,8 @@ class Exposure:
         fits.writeto(filename,flux,header=fhead,output_verify='warn')
         # Create the chip object
         self.chip = Chip(filename,self.base,self.host)
+        self.chip.meta['ccdnum'] = extension
+        self.chip._ccdnum = extension
         self.chip.bigextension = extension
         self.chip.outdir = self.outdir
         self.chip.keepdir = self.keepdir
@@ -198,7 +205,7 @@ class Exposure:
             self.logger.info("dt = "+str(time.time()-t0)+" seconds")
             if 2==1:
                 chiptimes = Table.read(basedir+'lists/nsc_dr3_chiptimes.fits')
-                chiptimes.add_row([(str(self.fluxfile).strip().split('/')[-1]).split('.')[0],i,
+                chiptimes.add_row([(str(self.filename).strip().split('/')[-1]).split('.')[0],i,
                                    int(self.chip.ccdnum),int(nsrc),int(t1_check-t0)])
                 chiptimes = Table(np.unique(chiptimes))
                 chiptimes.write(basedir+'lists/nsc_dr3_chiptimes.fits',overwrite=True)
@@ -237,7 +244,7 @@ class Chip:
         self.filename = filename
         self.bigbase = bigbase
         self.host = host
-        if host=="tempest_katie" or host=="tempest_group": self.bindir = "/home/x25h971/bin/"
+        if host=="tempest" or host=="tempest_group": self.bindir = "/home/x51j468/bin/"
         else: self.bindir = os.path.expanduser("~/bin/")
         self.bigextension = None
         base = os.path.basename(filename)
@@ -246,20 +253,35 @@ class Chip:
         self.base = base
         self.keepdir = None
         header = fits.getheader(filename)
-        self.meta = phot.makemeta(header=header)
+        self.meta = phot.makemeta(header=header)        
+        # Make wt and mask files
+        im,head = fits.getdata(filename,header=True)
+        # Saturated pixels
+        self.meta['saturate'] = 60000
+        badpix = (im>60000)
+        # Create error image
+        noise = np.sqrt(np.maximum(im,0)/self.gain + self.rdnoise**2)
+        noise = np.maximum(noise,1)
+        wt = 1/noise**2
+        wt[badpix] = 0
+        fits.writeto('wt.fits',wt)
+        self.wtfile = 'wt.fits'
+        # Create mask image
+        mask = np.zeros(im.shape,np.int16)
+        mask[badpix] = 1
+        fits.writeto('mask.fits',mask)
+        self.maskfile = 'mask.fits'
         self.sexfile = self.dir+"/"+self.base+"_sex.fits"
         self.daofile = self.dir+"/"+self.base+"_dao.fits"
         self.sexcatfile = None
         self.sexcat = None
         self.seeing = None
         self.apcorr = None
-        #-----------------------------------------------------------#ktedit:sex2 T
         # For the second run of SExtractor on the ALLSTAR PSF-subtracted file
-        self.allsubfile=self.dir+"/"+self.base+"_daos.fits"
-        self.smeta = None #in runsex(), define self.meta=makemeta(header=fits.getheader(allsubfile,0)) 
+        self.allsubfile = self.dir+"/"+self.base+"_daos.fits"
+        self.smeta = None
         self.sexcatfile2 = None
         self.sexcat2 = None
-        #-----------------------------------------------------------#ktedit:sex2 B      
         # Internal hidden variables
         self._rdnoise = None
         self._gain = None
@@ -274,51 +296,46 @@ class Chip:
         self.sexiter = 1          #ktedit:sex2; to keep track of which SExtractor run we're on
         # Logger
         self.logger = None
-    
-    def __repr__(self):
-        return "Chip object"
+        # Estimate FWHM=
+        im,head = fits.getdata(self.filename,header=True)
+        im = pm.ccddata.CCDData(im,header=head)
+        objects = pm.detection.detect(im,nsigma=10)
+        objects = pm.aperture.aperphot(im,objects)
+        fwhmpix = pm.utils.estimatefwhm(objects)
+        fwhmarcsec = fwhmpix*self.meta['pixscale']
+        self._fwhm = fwhmarcsec
+        self.meta['fwhm'] = fwhmarcsec
         
+    def __repr__(self):
+        return "Chip object"        
         
     @property
     def rdnoise(self):
         # We have it already, just return it
-        if self._rdnoise is not None:
+        if hasattr(self,'_rdnoise') and self._rdnoise is not None:
             return self._rdnoise
         # Can't get rdnoise, no header yet
         if self.meta is None:
             self.logger.warning("Cannot get RDNOISE, no header yet")
             return None
-        # Check DECam style rdnoise
-        if "RDNOISEA" in self.meta.keys():
-            rdnoisea = self.meta["RDNOISEA"]
-            rdnoiseb = self.meta["RDNOISEB"]
-            rdnoise = (rdnoisea+rdnoiseb)*0.5
-            self._rdnoise = rdnoise
-            return self._rdnoise
         # Get rdnoise from the header
         for name in ['RDNOISE','READNOIS','ENOISE']:
             # We have this key, set _rndoise and return
             if name in self.meta.keys():
-                self._rdnoise = self.meta[name]
+                self._rdnoise = float(self.meta[name])
                 return self._rdnoise
-        if self.instrument=='c4d':
-            import pdb; pdb.set_trace()
         self.logger.warning('No RDNOISE found')
         return None
             
     @property
     def gain(self):
         # We have it already, just return it
-        if self._gain is not None:
+        if hasattr(self,'_gain') and self._gain is not None:
             return self._gain
         try:
-            gainmap = { 'c4d': lambda x: 0.5*(x.get('gaina')+x.get('gainb')),
-                        'k4m': lambda x: x.get('gain'),
-                        'ksb': lambda x: [1.3,1.5,1.4,1.4][ccdnum-1] }  # bok gain in HDU0, use list here
-            gain = gainmap[self.instrument](self.meta)
+            gain = float(self.meta['gain'])
         except:
-            gainmap_avg = { 'c4d': 3.9845419, 'k4m': 1.8575, 'ksb': 1.4}
-            gain = gainmap_avg[self.instrument]
+            raise Exception('no gain')
         self._gain = gain
         return self._gain
             
@@ -404,59 +421,19 @@ class Chip:
         return None
 
     @property
-    def instrument(self):
+    def fwhm(self):
         # We have it already, just return it
-        if self._instrument is not None:
-            return self._instrument
-        # Can't get instrument, no header yet
-        if self.meta is None:
-            self.logger.warning("Cannot get INSTRUMENT, no header yet")
-            return None
-        # instrument, c4d, k4m or ksb
-        # DTINSTRU = 'mosaic3 '
-        # DTTELESC = 'kp4m    '
-        # Bok 90Prime data has
-        if self.meta.get("DTINSTRU") == 'mosaic3':
-            self._instrument = 'k4m'
-            return self._instrument
-        elif self.meta.get("DTINSTRU") == '90prime':
-            self._instrument = 'ksb'
-            return self._instrument
-        else:
-            self._instrument = 'c4d'
-            return self._instrument
-
-    @property
-    def plver(self):
-        # We have it already, just return it
-        if self._plver is not None:
-            return self._plver
-        # Can't get plver, no header yet
-        if self.meta is None:
-            self.logger.warning("Cannot get PLVER, no header yet")
-            return None
-        plver = self.meta.get('PLVER')
-        if plver is None:
-            self._plver = 'V1.0'
-        self._plver = plver
-        return self._plver
-
-    @property
-    def cpfwhm(self):
-        # We have it already, just return it
-        if self._cpfwhm is not None:
-            return self._cpfwhm
-        # Can't get fwhm, no header yet
-        if self.meta is None:
-            self.logger.warning("Cannot get CPFWHM, no header yet")
-            return None
-        # FWHM values are ONLY in the extension headers
-        cpfwhm_map = { 'c4d': 1.5 if self.meta.get('FWHM') is None else self.meta.get('FWHM')*0.27, 
-                       'k4m': 1.5 if self.meta.get('SEEING1') is None else self.meta.get('SEEING1'),
-                       'ksb': 1.5 if self.meta.get('SEEING1') is None else self.meta.get('SEEING1') }
-        cpfwhm = cpfwhm_map[self.instrument]
-        self._cpfwhm = cpfwhm
-        return self._cpfwhm
+        if self._fwhm is not None:
+            return self._fwhm
+        from prometheus import prometheus as pm
+        im,head = fits.getdata(self.filename,header=True)
+        im = pm.ccddata.CCDData(im,header=head)
+        objects = pm.detection.detect(im,nsigma=10)
+        objects = pm.aperture.aperphot(im,objects)
+        fwhm = pm.utils.estimatefwhm(objects)
+        self._fwhm = fwhm
+        self.meta['fwhm'] = fwhm
+        return self._fwhm
 
     @property
     def maglim(self):
@@ -487,7 +464,7 @@ class Chip:
     #---------------------
     def runsex(self,dthresh=1.1,bindir="~/bin/",outfile=None):
         if self.sexiter==1: 
-            infile = self.fluxfile
+            infile = self.filename
             meta = self.meta
             sexcatfile = "flux_sex.cat.fits"
             offset = 0
@@ -499,7 +476,7 @@ class Chip:
             meta = self.smeta
             sexcatfile = "flux_sex"+str(self.sexiter)+".cat.fits"
             if self.sexcat is not None: offset=int(self.sexcat['NUMBER'][-1]) #ktedit:sex2
-        basedir, tmpdir = utils.getnscdirs(self.nscversion,self.host)
+        basedir, tmpdir = utils.getdirs(self.host)
         configdir = basedir+"config/"
         sexcat, maglim = phot.runsex(infile,self.wtfile,self.maskfile,meta,sexcatfile,configdir,
                                      offset=offset,sexiter=self.sexiter,dthresh=dthresh,
@@ -570,7 +547,7 @@ class Chip:
         
     # Make image ready for DAOPHOT
     def mkdaoim(self):
-        phot.mkdaoim(self.fluxfile,self.wtfile,self.maskfile,self.meta,self.daofile,logger=self.logger)
+        phot.mkdaoim(self.filename,self.wtfile,self.maskfile,self.meta,self.daofile,logger=self.logger)
 
     # DAOPHOT detection
     #----------------------
@@ -859,7 +836,7 @@ class Chip:
     def cleanup(self):
         # Move files we want to keep to temporary "keep" subdirectory
         self.logger.info("Copying final files to 'keep' directory "+self.keepdir)
-        base = os.path.basename(self.fluxfile)
+        base = os.path.basename(self.filename)
         base = os.path.splitext(os.path.splitext(base)[0])[0]
         daobase = os.path.basename(self.daofile)
         daobase = os.path.splitext(os.path.splitext(daobase)[0])[0]
@@ -981,4 +958,4 @@ if __name__ == "__main__":
     # Run
     exp.run()
 
-    print("Total time = "+str(time.time()-t0)+" seconds")
+    print("Total time = {:.2f} seconds".format(time.time()-t0))

@@ -54,31 +54,6 @@ def datadir():
     datadir = packagedir+'/data/'
     return datadir
 
-def rootdirs():
-    # Return the NSC root directories for various machines
-
-    hostname = socket.gethostname()
-    host = hostname.split('.')[0]
-
-    if host.find('thing') > -1 or host.find('hulk') > -1:
-        #dldir = '/dl1/users/'
-        dldir = '/net/dl2/'
-        localdir = '/d0/'
-    elif host.find('gp09') > -1 or host.find('gp08') > -1 or host.find('gp07') > -1 or \
-         host.find('gp06') > -1 or host.find('gp05') > -1:
-        dldir = '/net/dl2/'
-        localdir = '/data0/'
-    elif host.find('tempest') > -1 or hostname.find('tempest') > -1:
-        dldir = '/home/x51j468/'
-        localdir = '/tmp/'
-    elif host.find('tacc') > -1 or hostname.find('tac') > -1:
-        dldir = '/corral/projects/NOIRLab/kmtnet/catalogs/'
-        localdir = '/tmp/'
-    else:
-        raise ValueError(host+' UNKNOWN')
-
-    return dldir,localdir
-
 def func_poly2d_wrap(x,*args):
     """ thin wrapper for curve_fit"""
     xx = x[0]
@@ -2039,41 +2014,33 @@ def concatmeas(expdir,base=None,deletetruncated=False):
 
 
 # Get NSC directories
-def getnscdirs(version=None,host=None):
+def getdirs(host=None):
     # username
     try:
         username = getpwuid(os.getuid())[0]
     except:
         username = 'defaultuser'
-    # Version
-    verdir = ""
-    if version is not None:
-       verdir = version if version.endswith('/') else version+"/"
     # Host
     if host is None:
         hostname = socket.gethostname()
         host = hostname.split('.')[0].strip()
-    print("host = ",host)
+    #print("host = ",host)
     # on gp07 use
     if (host == "gp09") | (host == "gp08") | (host == "gp07") | (host == "gp06") | (host == "gp05"): 
-        basedir = os.path.join("/net/dl2/kfas/nsc/instcal/",verdir)
+        basedir = os.path.join("/net/dl2/dnidever/kmtnet/")
         tpmroot = os.path.join(basedir,"tmp")
     # on tempest use
-    elif host=="tempest_katie":
-        basedir = os.path.join("/home/x25h971/nsc/instcal/",verdir)
+    elif host=="tempest":
+        basedir = "/home/x51j468/kmtnet/"
         tmproot = os.path.join(basedir,"tmp/")
     elif host=="tempest_group":
-        basedir = os.path.join("/home/group/davidnidever/nsc/instcal/",verdir)
+        basedir = os.path.join("/home/group/davidnidever/kmtnet/",verdir)
         #tmproot = os.path.join(basedir,"tmp")
-        tmproot = os.path.join('/tmp',username,'nsc','instcal',verdir)
-    elif host=="cca":
-        basedir = os.path.join('/mnt/home/dnidever/ceph/nsc/instcal/',verdir)
-        tmproot = os.path.join('/mnt/home/dnidever/ceph/nsc/',verdir,'tmp')
+        tmproot = os.path.join('/tmp',username,'kmtnet')
     elif host=="tacc":
         #basedir = '/corral/projects/NOIRLab/nsc/instcal/'+verdir
-        basedir = os.path.join('/scratch1/09970/dnidever/nsc/instcal/',verdir)
-        #tmproot = os.path.join('/scratch1/09970/dnidever/nsc/',verdir,'tmp')
-        tmproot = os.path.join('/tmp',username,'nsc',verdir)
+        basedir = os.path.join('/scratch1/09970/dnidever/kmtnet/')
+        tmproot = os.path.join('/tmp',username,'kmtnet')
     else:
         basedir = os.getcwd()
         tmproot = os.path.join(basedir,"tmp")
