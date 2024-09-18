@@ -1,2 +1,0 @@
-# kmtnet
-KMTNet reduction
