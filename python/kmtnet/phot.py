@@ -870,7 +870,7 @@ def runsex(fluxfile=None,wtfile=None,maskfile=None,meta=None,outfile=None,config
     # CHECKIMAGE_NAME segment.fits
     # DETECT_THRESH    1.1 originally, will be changed depending on density/fwhm #ktedit:sex2
     # ANALYSIS_THRESH   same as DETECT_THRESH                                    #ktedit:sex2
-
+    
     filter_name = ''
     cnt = 0
     for l in lines:
@@ -2056,11 +2056,11 @@ def daopsf(imfile=None,listfile=None,apfile=None,optfile=None,neifile=None,outfi
     # Make sure we have the image file name
     if imfile is None:
         logger.warning("No image filename input")
-        return None
+        return None,None,None
     # Make sure we have the list file name
     if listfile is None:
         logger.warning("No list filename input")
-        return None
+        return None,None,None
     
     logger.info("Input file = "+imfile) #ktedit:cpsf
 
@@ -2080,7 +2080,7 @@ def daopsf(imfile=None,listfile=None,apfile=None,optfile=None,neifile=None,outfi
     for f in [imfile,listfile,optfile,apfile]:
         if os.path.exists(f) is False:
             logger.warning(f+" NOT found")
-            return None
+            return None,None,None
 
     # Make temporary short filenames to DAOPHOT can handle them
     tid,tfile = tempfile.mkstemp(prefix="tpsf",dir=".")
@@ -2135,6 +2135,15 @@ def daopsf(imfile=None,listfile=None,apfile=None,optfile=None,neifile=None,outfi
         traceback.print_exc()
         raise Exception("DAOPHOT failed")
 
+    # Check if it failed to converage
+    if os.path.exists(logfile):
+        plines = readlines(logfile)
+        bad = grep(plines,'Failed to converge',index=True)
+        results = grep(plines,'>> ',index=True)
+        if len(bad)>0 and len(results)==0:
+            logger.error("DAOPHOT PSF failed to converge")
+            return None,None,None
+        
     # Check that the output file exists
     if (os.path.exists(toutfile)) is True and (os.path.getsize(toutfile)!=0):
         # Move output file to the final filename
@@ -2445,7 +2454,7 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
     if apfile is None: apfile = base+".ap"
     if psffile is None: psffile = base+".psf"
     if subfile is None: outfile = base+"a.fits"
-    if logfile is None: logfile = base+".cpsf.log"
+    if logfile is None: logfile = base+".psf.log"
     if neifile is None: neifile = base+".nei"
     if nstfile is None: nstfile = base+".nsf"
     if grpfile is None: grpfile = base+".grp"
@@ -2477,7 +2486,8 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
     mean_subchi_last = 0
     subdchi_thresh = 0.002
     while (subendflag==False):    
-        logger.info("Flag & neighbor subtraction iter = "+str(subiter)) 
+        logger.info("Cleaning iteration = "+str(subiter))
+        #logger.info("Flag & neighbor subtraction iter = "+str(subiter))         
 
         # Iterate subtraction of flagged PSF sources from psf list
         #---------
@@ -2513,10 +2523,13 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
             # Run DAOPSF
             try:
                 pararr, parchi, profs = daopsf(imfile,wlistfile,apfile,logger=logger)
-                chi = np.min(parchi)
-                mean_chi = np.mean(profs['SIG'])
-                logger.info("mean chi = "+str(mean_chi))
-                psfsuccess = True
+                if pararr is not None:
+                    chi = np.min(parchi)
+                    mean_chi = np.mean(profs['SIG'])
+                    logger.info("mean chi = "+str(mean_chi))
+                    psfsuccess = True
+                else:
+                    psfsuccess = False
             except:
                 logger.error("Failure in DAOPSF")
                 traceback.print_exc()
@@ -2532,11 +2545,16 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
                     writelines(optfile,opttable,overwrite=True)                    
                     logger.info('Retrying DAOPHOT PSF with AN='+newanpsf)
                     pararr, parchi, profs = daopsf(imfile,wlistfile,apfile,logger=logger)
-                    chi = np.min(parchi)
-                    mean_chi = np.mean(profs['SIG'])     
-                    logger.info("mean chi = "+str(mean_chi))
-                    psfsuccess = True
+                    if pararr is not None:
+                        chi = np.min(parchi)
+                        mean_chi = np.mean(profs['SIG'])     
+                        logger.info("mean chi = "+str(mean_chi))
+                        psfsuccess = True
 
+            if psfsuccess==False:
+                print('no psf success')
+                import pdb; pdb.set_trace()
+                        
             # Check for bad stars
             nstars = len(profs)
             gdstars = (profs['FLAG'] != 'saturated')
@@ -2617,8 +2635,6 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
 
             # No subtracted image
             else:
-                if os.getcwd()=='/scratch1/09970/dnidever/nsc/v4/tmp/c4d_140405_101149_ooi_i_MT1.1':
-                    import pdb; pdb.set_trace()
                 print('No PSF star neighbor subtracted image. Ending iteration')
                 subendflag = True
 
@@ -2634,8 +2650,18 @@ def createpsf(imfile=None,apfile=None,listfile=None,psffile=None,doiter=True,max
             os.rename(imfile,finalsubfile)   # copy subfile to a version that marks the iteration
             os.rename("temp_"+imfile,imfile) # move the image file back to its original name
             logger.info(imfile+" moved back to "+finalsubfile+", temp_"+imfile+" moved back to "+imfile)
+
+        # Keep a copy of the success PSF file
+        if os.path.exists(psffile):
+            shutil.copy(psffile,psffile+'.'+str(subiter))
+        if os.path.exists(logfile):
+            shutil.copy(logfile,logfile+'.'+str(subiter))
+            
+        # Increment the counter
         subiter = subiter+1        
 
+        # end of cleaning iteration
+        
     # Put information in meta
     if meta is not None:
         meta['PSFCHI'] = (chi,"Final PSF Chi value")
@@ -2747,7 +2773,7 @@ def allstar(imfile=None,psffile=None,apfile=None,subfile=None,outfile=None,optfi
 
     # Load the option file lines
     optlines = readlines(optfile)
-    print("optfile = ",optfile)
+    logger.info("optfile = "+optfile)
     optlines=[line +'\n' for line in optlines]
     # Lines for the DAOPHOT ALLSTAR script
     lines = ["#!/bin/sh\n",
@@ -2799,6 +2825,7 @@ def allstar(imfile=None,psffile=None,apfile=None,subfile=None,outfile=None,optfi
     # Failure
     else:
         logger.error("Output file "+outfile+" NOT Found")
+        import pdb; pdb.set_trace()
         raise Exception("ALLSTAR failed")
 
     # Delete the script

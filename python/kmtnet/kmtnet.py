@@ -69,7 +69,7 @@ class Exposure:
         self.host = host
         self.filename = None      # working files in temp dir
         base = os.path.basename(filename)
-        base = os.path.splitext(os.path.splitext(base)[0])[0]
+        base = os.path.splitext(base)[0]
         self.base = base
         self.logfile = base+".log"
         self.logger = None
@@ -248,7 +248,7 @@ class Chip:
         else: self.bindir = os.path.expanduser("~/bin/")
         self.bigextension = None
         base = os.path.basename(filename)
-        base = os.path.splitext(os.path.splitext(base)[0])[0]
+        base = os.path.splitext(base)[0]
         self.dir = os.path.abspath(os.path.dirname(filename))
         self.base = base
         self.keepdir = None
@@ -473,6 +473,8 @@ class Chip:
             daobase = os.path.splitext(os.path.splitext(daobase)[0])[0]             
             infile = daobase+str(self.sexiter-1)+"s.fits"
             self.smeta = phot.makemeta(header=fits.getheader(infile,0))  #should this be self.smeta?  probably.
+            if 'saturate' not in self.smeta: self.smeta['SATURATE']=self.meta['SATURATE']
+            if 'fwhm' not in self.smeta: self.smeta['FWHM']=self.meta['FWHM']
             meta = self.smeta
             sexcatfile = "flux_sex"+str(self.sexiter)+".cat.fits"
             if self.sexcat is not None: offset=int(self.sexcat['NUMBER'][-1]) #ktedit:sex2
@@ -646,10 +648,10 @@ class Chip:
             file1 = daobase+".als"                                      # total ALLSTAR cat stored in this file
             file2 = daobase+str(self.sexiter)+".als"                    # new ALLSTAR cat stored in this file
 
-        cat1 = readlines(file1)
-        cat2 = readlines(file2)
+        cat1 = dln.readlines(file1)
+        cat2 = dln.readlines(file2)
         combined_cat = cat1+cat2[3:]                                    # combine the catalogs 
-        writelines(file1,combined_cat,overwrite=True)
+        dln.writelines(file1,combined_cat,overwrite=True)
 
     # Get aperture correction
     #------------------------
