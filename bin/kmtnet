@@ -6,6 +6,7 @@ import numpy as np
 import warnings
 from astropy.io import fits
 from astropy.utils.exceptions import AstropyWarning
+from astropy.wcs import WCS
 import time
 import shutil
 import re
@@ -17,12 +18,12 @@ from datetime import datetime
 from argparse import ArgumentParser
 import traceback
 from kmtnet import utils
-from kmtnet.kmtnet import Exposure
+import prometheus as pm
 
 if __name__ == "__main__":
 
     # Run measurement on one full KMTNet image
-    parser = ArgumentParser(description='Run measurement on one NSC InstCal image')
+    parser = ArgumentParser(description='Run measurement on one KMTNet image')
     parser.add_argument('filename', type=str, nargs=1, help='Absolute flux filename')
     parser.add_argument('--host',type=str,nargs=1,default="tempest",help='hostname ("tempest","tempest_group","gp09/7","tacc")')
     parser.add_argument('--stagger',type=int, nargs=1, default=0, help='Stagger time')
@@ -43,19 +44,6 @@ if __name__ == "__main__":
     print("host =",host)
     print("stagger =",stagger)
     print("redo =",redo)
-    
-    # Get directories
-    basedir, tmpdir = utils.getdirs(host)
-    print("Working in basedir,tmpdir = ",basedir,tmpdir)
-    # Make sure the directories exist                                                                         
-    if not os.path.exists(basedir):
-        os.makedirs(basedir)
-    if not os.path.exists(tmpdir):
-        # try/except to handle race condition
-        try:
-            os.makedirs(tmpdir)
-        except:
-            pass
 
     # File names
     filename = args.filename
@@ -72,37 +60,62 @@ if __name__ == "__main__":
         sleeptime = np.random.randint(1,stagger)
         print('Sleeping {:} seconds'.format(sleeptime))
         time.sleep(sleeptime)
+
+
+    # Output directory
+    basedir,tmpdir = utils.getdirs(host)
+    base = os.path.basename(filename)
+    base = os.path.splitext(base)[0]
+    head0 = fits.getheader(filename,0)
+    dateobs = head0.get("DATE-OBS")
+    night = dateobs[0:4]+dateobs[5:7]+dateobs[8:10]
+    outdir = os.path.join('/home/x51j468/kmtnet/',night,base)
+    if os.path.exists(outdir)==False:
+        os.makedirs(outdir)
         
     # Start keeping time                                                                                      
     t0 = time.time()
 
-    # Create the Exposure object
-    exp = Exposure(filename,host=host)
+    print('Running Prometheus on '+filename)
+    print('')
+    
+    hdu = fits.open(filename)
+    for i in np.arange(1,5):
+        print('Processing chip {:d}'.format(i))
+        print('------------------')
+        w = WCS(hdu[i].header)
+        im = pm.ccddata.CCDData(hdu[i].data,header=hdu[i].header,wcs=w)
+        im.bin(2,tot=True)
+        out,model,sky,psf = pm.run(im,verbose=True,psfname='penny',lookup=True,lorder=1)
 
-    # Check if the output files already exist
-    if redo==False and os.path.exists(exp.outdir):
-        outfile = os.path.join(exp.outdir,exp.base+'_meas.fits')
-        if os.path.exists(outfile):
-            print(outfile,' output file already exists.  Use --redo to overwrite.')
-            sys.exit()
-    if redo and os.path.exists(exp.outdir):
-        print('Removing old output directory ',exp.outdir)
-        shutil.rmtree(exp.outdir)
+        outfile = os.path.join(outdir,base+'_{:02d}_pm.fits'.format(i))
+                
+        # Save the output
+        print('Writing output to '+outfile)
+        if os.path.exists(outfile): os.remove(outfile)
+        hdulist = fits.HDUList()
+        hdulist.append(fits.table_to_hdu(out))  # table
+        hdulist[1].header['EXTNAME'] = 'SOURCE TABLE'
+        hdulist[0].header['COMMENT']='Prometheus version '+str(pm.__version__)
+        hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
+        hdulist[0].header['COMMENT']='File '+f
+        hdulist[0].header['COMMENT']='HDU#0 : Header Only'
+        hdulist[0].header['COMMENT']='HDU#1 : Source catalog'
+        hdulist[0].header['COMMENT']='HDU#2 : Model image'
+        hdulist[0].header['COMMENT']='HDU#3 : Sky model image'
+        hdulist[0].header['COMMENT']='HDU#4 : PSF model'
+        hdulist.append(model.tohdu())  # model
+        hdulist[2].header['EXTNAME'] = 'MODEL IMAGE'
+        hdulist[2].header['COMMENT'] = 'Prometheus model image'
+        hdulist.append(sky.tohdu())    # sky
+        hdulist[3].header['EXTNAME'] = 'SKY MODEL IMAGE'            
+        hdulist[3].header['COMMENT'] = 'Prometheus sky image'
+        hdulist += psf.tohdu()    # psf, returns a list
+        hdulist.writeto(outfile,overwrite=True)
+        hdulist.close()
 
-    # Run
-    try:
-        exp.run()
-    except:
-        traceback.print_exc()
-        print('Problem running exposure')
-
-    # Always delete temporary files
-    try:
-        print('Deleting temporary directory',tmpdir)
-        shutil.rmtree(tmpdir)
-    except:
-        traceback.print_exc()
-        print('Problems deleting temporary directory',tmpdir)
+        import pdb; pdb.set_trace()
+        
     
     print("Total time = "+str(time.time()-t0)+" seconds")
 
