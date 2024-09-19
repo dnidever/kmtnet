@@ -77,10 +77,10 @@ if __name__ == "__main__":
     t0 = time.time()
 
     print('Running Prometheus on '+filename)
-    print('')
     
     hdu = fits.open(filename)
     for i in np.arange(1,5):
+        print('')
         print('Processing chip {:d}'.format(i))
         print('------------------')
         w = WCS(hdu[i].header)
