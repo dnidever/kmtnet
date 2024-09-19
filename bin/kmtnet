@@ -88,8 +88,8 @@ if __name__ == "__main__":
         im.bin(2,tot=True)
         out,model,sky,psf = pm.run(im,verbose=True,psfname='penny',lookup=True,lorder=1)
 
-        outfile = os.path.join(outdir,base+'_{:02d}_pm.fits'.format(i))
-                
+        outfile = os.path.join(outdir,base+'_{:02d}_meas.fits'.format(i))
+        
         # Save the output
         print('Writing output to '+outfile)
         if os.path.exists(outfile): os.remove(outfile)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         hdulist[1].header['EXTNAME'] = 'SOURCE TABLE'
         hdulist[0].header['COMMENT']='Prometheus version '+str(pm.__version__)
         hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
-        hdulist[0].header['COMMENT']='File '+f
+        hdulist[0].header['COMMENT']='File '+filename
         hdulist[0].header['COMMENT']='HDU#0 : Header Only'
         hdulist[0].header['COMMENT']='HDU#1 : Source catalog'
         hdulist[0].header['COMMENT']='HDU#2 : Model image'
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         hdulist.writeto(outfile,overwrite=True)
         hdulist.close()
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         
     
     print("Total time = "+str(time.time()-t0)+" seconds")
