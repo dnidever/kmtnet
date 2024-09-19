@@ -87,11 +87,14 @@ if __name__ == "__main__":
         im = pm.ccddata.CCDData(hdu[i].data,header=hdu[i].header,wcs=w)
         im.bin(2,tot=True)
         out,model,sky,psf = pm.run(im,verbose=True,psfname='penny',lookup=True,lorder=1)
-
-        outfile = os.path.join(outdir,base+'_{:02d}_meas.fits'.format(i))
         
         # Save the output
-        print('Writing output to '+outfile)
+        outfile = os.path.join(outdir,base+'_{:02d}_tab.fits'.format(i))
+        print('Writing table to '+outfile)        
+        out.write(outfile,overwrite=True)
+        res = subprocess.call(['gzip','-f',outfile],shell=False)
+        outfile = os.path.join(outdir,base+'_{:02d}_model.fits'.format(i))        
+        print('Writing model to '+outfile)
         if os.path.exists(outfile): os.remove(outfile)
         hdulist = fits.HDUList()
         hdulist.append(fits.table_to_hdu(out))  # table
@@ -100,20 +103,21 @@ if __name__ == "__main__":
         hdulist[0].header['COMMENT']='Date '+datetime.now().ctime()
         hdulist[0].header['COMMENT']='File '+filename
         hdulist[0].header['COMMENT']='HDU#0 : Header Only'
-        hdulist[0].header['COMMENT']='HDU#1 : Source catalog'
-        hdulist[0].header['COMMENT']='HDU#2 : Model image'
-        hdulist[0].header['COMMENT']='HDU#3 : Sky model image'
-        hdulist[0].header['COMMENT']='HDU#4 : PSF model'
+        hdulist[0].header['COMMENT']='HDU#1 : Model image'
+        hdulist[0].header['COMMENT']='HDU#2 : Sky model image'        
+        hdulist[0].header['COMMENT']='HDU#3 : PSF model'
+        hdulist[0].header['COMMENT']='HDU#4 : PSF model lookup'        
         hdulist.append(model.tohdu())  # model
-        hdulist[2].header['EXTNAME'] = 'MODEL IMAGE'
-        hdulist[2].header['COMMENT'] = 'Prometheus model image'
+        hdulist[1].header['EXTNAME'] = 'MODEL IMAGE'
+        hdulist[1].header['COMMENT'] = 'Prometheus model image'
         hdulist.append(sky.tohdu())    # sky
-        hdulist[3].header['EXTNAME'] = 'SKY MODEL IMAGE'            
-        hdulist[3].header['COMMENT'] = 'Prometheus sky image'
+        hdulist[2].header['EXTNAME'] = 'SKY MODEL IMAGE'            
+        hdulist[2].header['COMMENT'] = 'Prometheus sky image'
         hdulist += psf.tohdu()    # psf, returns a list
         hdulist.writeto(outfile,overwrite=True)
         hdulist.close()
-
+        res = subprocess.call(['gzip','-f',outfile],shell=False)
+        
         #import pdb; pdb.set_trace()
         
     
