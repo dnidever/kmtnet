@@ -6,6 +6,7 @@ import numpy as np
 import warnings
 from astropy.io import fits
 from astropy.utils.exceptions import AstropyWarning
+from astropy.table import Table,vstack
 from astropy.wcs import WCS
 import time
 import shutil
@@ -118,8 +119,20 @@ if __name__ == "__main__":
         hdulist.close()
         res = subprocess.call(['gzip','-f',outfile],shell=False)
         
-        #import pdb; pdb.set_trace()
-        
+    # Combine the tables for the 4 chips
+    tab = None
+    for i in np.arange(1,5):
+        outfile = os.path.join(outdir,base+'_{:02d}_tab.fits.gz'.format(i))
+        tab1 = Table.read(outfile)
+        tab1['chip'] = i
+        if tab is None:
+            tab = tab1
+        else:
+            tab = vstack((tab,tab1))
+    outfile = os.path.join(outdir,base+'_tab.fits')
+    print('Writing combined table to '+outfile)
+    tab.write(outfile,overwrite=True)
+    res = subprocess.call(['gzip','-f',outfile],shell=False)
     
     print("Total time = "+str(time.time()-t0)+" seconds")
 
